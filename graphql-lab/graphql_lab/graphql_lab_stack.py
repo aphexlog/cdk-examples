@@ -1,5 +1,6 @@
 from aws_cdk import (
     Stack,
+    RemovalPolicy,
     aws_dynamodb as dynamodb,
     aws_appsync as appsync,
 )
