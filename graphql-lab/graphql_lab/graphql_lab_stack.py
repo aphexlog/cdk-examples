@@ -1,8 +1,22 @@
-from aws_cdk import (
-    Stack,
-    RemovalPolicy,
-    aws_dynamodb as dynamodb,
-    aws_appsync as appsync,
+from aws_cdk import RemovalPolicy, Stack
+from aws_cdk.aws_appsync import (
+    CfnGraphQLSchema,
+    CfnGraphQLApi,
+    CfnApiKey,
+    CfnDataSource,
+    CfnResolver
+)
+from aws_cdk.aws_dynamodb import (
+    Table,
+    Attribute,
+    AttributeType,
+    StreamViewType,
+    BillingMode
+)
+from aws_cdk.aws_iam import (
+    Role,
+    ServicePrincipal,
+    ManagedPolicy
 )
 from constructs import Construct
 
@@ -12,64 +26,153 @@ class GraphqlLabStack(Stack):
         super().__init__(scope, construct_id, **kwargs)
 
         # Create the DynamoDB table for messages
-        messages_table = dynamodb.Table(
+        messages_table = Table(
             self,
             "MessagesTable",
-            partition_key=dynamodb.Attribute(
-                name="conversationId", type=dynamodb.AttributeType.STRING
+            partition_key=Attribute(
+                name="conversationId",
+                type=AttributeType.STRING
             ),
-            sort_key=dynamodb.Attribute(name="id", type=dynamodb.AttributeType.STRING),
-            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-            removal_policy=RemovalPolicy.DESTROY,  # For development only
+            sort_key=Attribute(
+                name="id",
+                type=AttributeType.STRING
+            ),
+            billing_mode=BillingMode.PAY_PER_REQUEST,
+            stream=StreamViewType.NEW_IMAGE,
+            removal_policy=RemovalPolicy.DESTROY  # For development only
         )
 
         # Create the AppSync API
-        api = appsync.GraphqlApi(
+        chat_api = CfnGraphQLApi(
             self,
-            "ChatApi",
-            name="chat-api",
-            schema=appsync.SchemaFile.from_asset("graphql_lab/schema.graphql"),
+            'ChatApi',
+            name='chat-api',
+            authentication_type='API_KEY'
         )
 
-        # Create the DynamoDB data source
-        messages_ds = api.add_dynamo_db_data_source(
-            "MessagesDataSource", table=messages_table
+        # Create API Key
+        CfnApiKey(
+            self,
+            'ChatApiKey',
+            api_id=chat_api.attr_api_id
+        )
+
+        # Define schema
+        api_schema = CfnGraphQLSchema(
+            self,
+            'ChatSchema',
+            api_id=chat_api.attr_api_id,
+            definition="""\
+                type Message {
+                    id: ID!
+                    conversationId: String!
+                    content: String!
+                    sender: String!
+                    timestamp: String!
+                }
+                type Query {
+                    getConversation(conversationId: String!): [Message]
+                    listConversations: [Message]
+                }
+                input SendMessageInput {
+                    conversationId: String!
+                    content: String!
+                    sender: String!
+                }
+                type Mutation {
+                    sendMessage(input: SendMessageInput!): Message
+                }
+                type Schema {
+                    query: Query
+                    mutation: Mutation
+                }"""
+        )
+
+        # Create IAM role for DynamoDB access
+        dynamodb_role = Role(
+            self,
+            'ChatDynamoDBRole',
+            assumed_by=ServicePrincipal('appsync.amazonaws.com')
+        )
+
+        dynamodb_role.add_managed_policy(
+            ManagedPolicy.from_aws_managed_policy_name('AmazonDynamoDBFullAccess')
+        )
+
+        # Create DynamoDB data source
+        messages_ds = CfnDataSource(
+            self,
+            'MessagesDataSource',
+            api_id=chat_api.attr_api_id,
+            name='MessagesDynamoDataSource',
+            type='AMAZON_DYNAMODB',
+            dynamo_db_config=CfnDataSource.DynamoDBConfigProperty(
+                table_name=messages_table.table_name,
+                aws_region=self.region
+            ),
+            service_role_arn=dynamodb_role.role_arn
         )
 
         # Create resolvers
-        messages_ds.create_resolver(
-            "QueryGetConversation",
-            type_name="Query",
-            field_name="getConversation",
-            request_mapping_template=appsync.MappingTemplate.dynamo_db_query(
-                cond={
-                    "conversationId": appsync.DynamoDbMappingTemplate.attribute(
-                        "conversationId"
-                    )
-                },
-            ),
-            response_mapping_template=appsync.MappingTemplate.dynamo_db_result_item(),
+        get_conversation_resolver = CfnResolver(
+            self,
+            'GetConversationQueryResolver',
+            api_id=chat_api.attr_api_id,
+            type_name='Query',
+            field_name='getConversation',
+            data_source_name=messages_ds.name,
+            request_mapping_template="""\
+            {
+                "version": "2017-02-28",
+                "operation": "Query",
+                "query": {
+                    "expression": "conversationId = :conversationId",
+                    "expressionValues": {
+                        ":conversationId": $util.dynamodb.toDynamoDBJson($ctx.args.conversationId)
+                    }
+                }
+            }""",
+            response_mapping_template="$util.toJson($ctx.result.items)"
         )
+        get_conversation_resolver.add_depends_on(api_schema)
 
-        messages_ds.create_resolver(
-            "QueryListConversations",
-            type_name="Query",
-            field_name="listConversations",
-            request_mapping_template=appsync.MappingTemplate.dynamo_db_scan_table(),
-            response_mapping_template=appsync.MappingTemplate.dynamo_db_result_list(),
+        list_conversations_resolver = CfnResolver(
+            self,
+            'ListConversationsQueryResolver',
+            api_id=chat_api.attr_api_id,
+            type_name='Query',
+            field_name='listConversations',
+            data_source_name=messages_ds.name,
+            request_mapping_template="""\
+            {
+                "version": "2017-02-28",
+                "operation": "Scan"
+            }""",
+            response_mapping_template="$util.toJson($ctx.result.items)"
         )
+        list_conversations_resolver.add_depends_on(api_schema)
 
-        messages_ds.create_resolver(
-            "MutationSendMessage",
-            type_name="Mutation",
-            field_name="sendMessage",
-            request_mapping_template=appsync.MappingTemplate.dynamo_db_put_item(
-                key=appsync.PrimaryKey.partition("conversationId").sort("id").auto(),
-                values={
-                    "content": appsync.Values.from_string("input.content"),
-                    "sender": appsync.Values.from_string("input.sender"),
-                    "timestamp": appsync.Values.from_string("$util.time.nowISO8601()"),
+        send_message_resolver = CfnResolver(
+            self,
+            'SendMessageMutationResolver',
+            api_id=chat_api.attr_api_id,
+            type_name='Mutation',
+            field_name='sendMessage',
+            data_source_name=messages_ds.name,
+            request_mapping_template="""\
+            {
+                "version": "2017-02-28",
+                "operation": "PutItem",
+                "key": {
+                    "conversationId": $util.dynamodb.toDynamoDBJson($ctx.args.input.conversationId),
+                    "id": $util.dynamodb.toDynamoDBJson($util.autoId())
                 },
-            ),
-            response_mapping_template=appsync.MappingTemplate.dynamo_db_result_item(),
+                "attributeValues": {
+                    "content": $util.dynamodb.toDynamoDBJson($ctx.args.input.content),
+                    "sender": $util.dynamodb.toDynamoDBJson($ctx.args.input.sender),
+                    "timestamp": $util.dynamodb.toDynamoDBJson($util.time.nowISO8601())
+                }
+            }""",
+            response_mapping_template="$util.toJson($ctx.result)"
         )
+        send_message_resolver.add_depends_on(api_schema)
