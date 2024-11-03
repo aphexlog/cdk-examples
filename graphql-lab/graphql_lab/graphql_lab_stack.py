@@ -120,7 +120,7 @@ class GraphqlLabStack(Stack):
             api_id=chat_api.attr_api_id,
             type_name='Query',
             field_name='getConversation',
-            data_source_name=messages_ds.name,
+            data_source_name=messages_ds.attr_name,
             request_mapping_template="""\
             {
                 "version": "2017-02-28",
@@ -135,6 +135,7 @@ class GraphqlLabStack(Stack):
             response_mapping_template="$util.toJson($ctx.result.items)"
         )
         get_conversation_resolver.add_depends_on(api_schema)
+        get_conversation_resolver.add_depends_on(messages_ds)
 
         list_conversations_resolver = CfnResolver(
             self,
@@ -142,7 +143,7 @@ class GraphqlLabStack(Stack):
             api_id=chat_api.attr_api_id,
             type_name='Query',
             field_name='listConversations',
-            data_source_name=messages_ds.name,
+            data_source_name=messages_ds.attr_name,
             request_mapping_template="""\
             {
                 "version": "2017-02-28",
@@ -151,6 +152,7 @@ class GraphqlLabStack(Stack):
             response_mapping_template="$util.toJson($ctx.result.items)"
         )
         list_conversations_resolver.add_depends_on(api_schema)
+        list_conversations_resolver.add_depends_on(messages_ds)
 
         send_message_resolver = CfnResolver(
             self,
@@ -158,7 +160,7 @@ class GraphqlLabStack(Stack):
             api_id=chat_api.attr_api_id,
             type_name='Mutation',
             field_name='sendMessage',
-            data_source_name=messages_ds.name,
+            data_source_name=messages_ds.attr_name,
             request_mapping_template="""\
             {
                 "version": "2017-02-28",
@@ -176,3 +178,4 @@ class GraphqlLabStack(Stack):
             response_mapping_template="$util.toJson($ctx.result)"
         )
         send_message_resolver.add_depends_on(api_schema)
+        send_message_resolver.add_depends_on(messages_ds)
