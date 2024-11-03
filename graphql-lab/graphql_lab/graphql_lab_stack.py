@@ -45,7 +45,7 @@ class GraphqlLabStack(Stack):
             type_name="Query",
             field_name="getConversation",
             request_mapping_template=appsync.MappingTemplate.dynamo_db_query(
-                key_condition=appsync.KeyCondition.eq("conversationId", "conversationId")
+                key_condition_expression=appsync.KeyCondition.eq("conversationId", "conversationId")
             ),
             response_mapping_template=appsync.MappingTemplate.dynamo_db_result_item()
         )
