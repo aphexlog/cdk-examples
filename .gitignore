@@ -9,3 +9,4 @@ venv/
 
 # environment
 .env
+.aider*
