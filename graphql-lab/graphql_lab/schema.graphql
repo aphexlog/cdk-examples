@@ -1,18 +1,27 @@
-type Item {
+type Message {
     id: ID!
-    name: String!
-    description: String
+    conversationId: ID!
+    content: String!
+    timestamp: String!
+    sender: String!
 }
 
-input ItemInput {
-    name: String!
-    description: String
+type Conversation {
+    id: ID!
+    messages: [Message]
+}
+
+input MessageInput {
+    conversationId: ID!
+    content: String!
+    sender: String!
 }
 
 type Query {
-    getItems: [Item]
+    getConversation(conversationId: ID!): Conversation
+    listConversations: [Conversation]
 }
 
 type Mutation {
-    addItem(input: ItemInput!): Item
+    sendMessage(input: MessageInput!): Message
 }
