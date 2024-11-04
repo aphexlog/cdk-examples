@@ -3,9 +3,10 @@ import uuid
 from datetime import datetime
 from typing import Dict, Any, List
 
+
 class ConversationManager:
     def __init__(self, table_name: str):
-        self.dynamodb = boto3.resource('dynamodb')
+        self.dynamodb = boto3.resource("dynamodb")
         self.table = self.dynamodb.Table(table_name)
 
     def create_conversation(self, initial_message: str, sender: str) -> Dict[str, Any]:
@@ -14,13 +15,13 @@ class ConversationManager:
         """
         conversation_id = str(uuid.uuid4())
         message = {
-            'conversationId': conversation_id,
-            'id': str(uuid.uuid4()),
-            'content': initial_message,
-            'sender': sender,
-            'timestamp': datetime.utcnow().isoformat()
+            "conversationId": conversation_id,
+            "id": str(uuid.uuid4()),
+            "content": initial_message,
+            "sender": sender,
+            "timestamp": datetime.utcnow().isoformat(),
         }
-        
+
         self.table.put_item(Item=message)
         return message
 
@@ -30,18 +31,25 @@ class ConversationManager:
         """
         # Query all messages in the conversation
         response = self.table.query(
-            KeyConditionExpression='conversationId = :cid',
-            ExpressionAttributeValues={
-                ':cid': conversation_id
-            }
+            KeyConditionExpression="conversationId = :cid",
+            ExpressionAttributeValues={":cid": conversation_id},
         )
-        
+
         # Delete each message
         with self.table.batch_writer() as batch:
-            for item in response.get('Items', []):
+            for item in response.get("Items", []):
                 batch.delete_item(
-                    Key={
-                        'conversationId': item['conversationId'],
-                        'id': item['id']
-                    }
+                    Key={"conversationId": item["conversationId"], "id": item["id"]}
                 )
+
+
+# create new conversation
+
+if __name__ == "__main__":
+    conversation_manager = ConversationManager(
+        "GraphqlLabStack-MessagesTable05B58A27-19E57EYMYG06E"
+    )
+    conversation = conversation_manager.create_conversation(
+        "Hello, how are you?", "Alice"
+    )
+    print(conversation)
